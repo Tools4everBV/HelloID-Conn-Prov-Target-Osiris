@@ -78,7 +78,7 @@ You can change this behavior by adjusting the updatePersonOnCorrelate within the
 
 > _For more information on how to configure a HelloID PowerShell connector, please refer to our [documentation](https://docs.helloid.com/hc/en-us/articles/360012558020-Configure-a-custom-PowerShell-target-system) pages_
 
-> _If you need help, feel free to ask questions on our [forum]([https://forum.helloid.com](https://forum.helloid.com/forum/helloid-connectors/provisioning/4943-helloid-conn-prov-target-osiris)https://forum.helloid.com/forum/helloid-connectors/provisioning/4943-helloid-conn-prov-target-osiris)_
+> _If you need help, feel free to ask questions on our [forum](https://forum.helloid.com/forum/helloid-connectors/provisioning/4943-helloid-conn-prov-target-osiris)
 
 ## HelloID docs
 
