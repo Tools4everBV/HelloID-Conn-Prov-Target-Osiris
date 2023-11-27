@@ -1,7 +1,7 @@
 ########################################
 # HelloID-Conn-Prov-Target-Osiris-Enable
 #
-# Version: 1.0.0
+# Version: 1.0.1
 ########################################
 # Initialize default values
 $config = $configuration | ConvertFrom-Json
@@ -142,7 +142,12 @@ try {
             Headers     = $headers
             ContentType = "application/json;charset=utf-8"
         }
-        $null = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
+        $response = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
+
+        # if response has a error code throw
+        if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
+            throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
+        }
 
         $success = $true
         $auditLogs.Add([PSCustomObject]@{

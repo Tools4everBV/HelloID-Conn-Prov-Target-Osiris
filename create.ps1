@@ -1,20 +1,19 @@
 ########################################
 # HelloID-Conn-Prov-Target-Osiris-Create
 #
-# Version: 1.0.0
+# Version: 1.0.1
 ########################################
 # Initialize default values
 $config = $configuration | ConvertFrom-Json
 $p = $person | ConvertFrom-Json
 $success = $false
 $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
-$dryRun = $false
 
 switch ($p.Details.gender) {
-    { ($_ -eq "man") -or ($_ -eq "male") } {
+    { ($_ -eq "man") -or ($_ -eq "male") -or ($_ -eq "M") } {
         $gender = "M"
     }
-    { ($_ -eq "vrouw") -or ($_ -eq "female") } {
+    { ($_ -eq "vrouw") -or ($_ -eq "female") -or ($_ -eq "V") } {
         $gender = "V"
     }
     Default {
@@ -28,14 +27,14 @@ $account = [PSCustomObject]@{
     p_achternaam           = $p.Name.FamilyName
     p_voorvoegsels         = $p.Name.FamilyNamePrefix
     p_voorletters          = $p.Name.Initials
-    p_roepnaam             = $p.Name.GivenName
+    p_roepnaam             = $p.Name.NickName
     p_geslacht             = $gender
     p_titel                = ""
     p_titel_achter         = ""
     p_indienst             = "N"
-    p_ldap_login           = $p.Name.FamilyName
+    p_ldap_login           = $p.Accounts.MicrosoftActiveDirectory.SamAccountName
     p_extern_onderhouden   = "J"
-    p_e_mail_adres         = $p.Contact.Business.Email
+    p_e_mail_adres         = $p.Accounts.MicrosoftActiveDirectory.mail
     p_faculteit            = "#ONVERANDERD#"
     p_organisatieonderdeel = "#ONVERANDERD#"
     p_profiel              = "#ONVERANDERD#"
@@ -155,6 +154,7 @@ try {
     # Add a warning message showing what will happen during enforcement
     if ($dryRun -eq $true) {
         Write-Warning "[DryRun] $action Osiris account for: [$($p.DisplayName)], will be executed during enforcement"
+        $aRef = "Unkown"
     }
     # Process
     if (-not($dryRun -eq $true)) {
@@ -174,7 +174,12 @@ try {
                     Headers     = $headers
                     ContentType = "application/json;charset=utf-8"
                 }
-                $null = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
+                $response = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
+
+                # if response has a error code throw
+                if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
+                    throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
+                }
 
                 # Get employee
                 $encodedGeneriekUserQuery = Resolve-UrlEncoding -InputString "{`"ldap_login`":`"$($account.p_ldap_login)`"}"
@@ -220,7 +225,12 @@ try {
                         Body    = ([System.Text.Encoding]::UTF8.GetBytes($openFieldBody))
                         Headers = $headers
                     }
-                    $null = Invoke-RestMethod @splatAddOpenFieldParams -Verbose:$false # Exception if not found
+                    $response = Invoke-RestMethod @splatAddOpenFieldParams -Verbose:$false # Exception if not found
+
+                    # if response has a error code throw
+                    if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
+                        throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
+                    }
                 }
                 catch {
                     $isPersIdUpdateRequred = $true
@@ -239,10 +249,14 @@ try {
 
             'Update-Correlate' {
                 Write-Verbose 'Updating and correlating Osiris account'
+
+                # p_medewerker must be "#ONVERANDERD#" when updating this value cannot be changed and is added to the body when a update is required
+                $account.p_medewerker = "#ONVERANDERD#"
                
                 # Second account object for the compare function
                 $targetAccount = [PSCustomObject]@{
-                    p_medewerker           = $responseUser.medewerker
+                    # p_medewerker must be "#ONVERANDERD#" when updating this value cannot be changed and is added to the body when a update is required
+                    p_medewerker           = "#ONVERANDERD#"
                     p_achternaam           = $responseUser.achternaam
                     p_voorvoegsels         = $responseUser.voorvoegsels
                     p_voorletters          = $responseUser.voorletters
@@ -271,11 +285,6 @@ try {
                 }
                 $propertiesChanged = (Compare-Object @splatCompareProperties -PassThru).Where({ $_.SideIndicator -eq '=>' })
                 
-                $isEmployeeFieldChanged = $propertiesChanged | Where-Object { $_.Name -eq "p_medewerker" }
-
-                if ($isEmployeeFieldChanged.count -gt 0) {
-                    throw "Username has changed, the user can not be updated"
-                }
                 if ($propertiesChanged) {
                     # Update employee
                     $body = $targetAccount
@@ -285,7 +294,8 @@ try {
                             $body."$($prop.name)" = $prop.value                       
                         }
                     }
-
+                    # Allways add p_medewerker to the body. This is required to update the medewerker instead of makeing a new one with the value $null
+                    $body.p_medewerker = $responseUser.medewerker
                     $body = ($body | ConvertTo-Json -Depth 10)           
                     $splatAddUserParams = @{
                         Uri         = "$($config.BaseUrl)/basis/medewerker"
@@ -294,7 +304,12 @@ try {
                         Headers     = $headers
                         ContentType = "application/json;charset=utf-8"
                     }
-                    $null = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
+                    $response = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
+
+                    # if response has a error code throw
+                    if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
+                        throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
+                    }
                 }
                 
                 $aRef = @{
