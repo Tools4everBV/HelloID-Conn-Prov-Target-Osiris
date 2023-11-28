@@ -1,7 +1,7 @@
 ########################################
 # HelloID-Conn-Prov-Target-Osiris-Update
 #
-# Version: 1.0.0
+# Version: 1.0.1
 ########################################
 # Initialize default values
 $config = $configuration | ConvertFrom-Json
@@ -11,10 +11,10 @@ $success = $false
 $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
 
 switch ($p.Details.gender) {
-    { ($_ -eq "man") -or ($_ -eq "male") } {
+    { ($_ -eq "man") -or ($_ -eq "male") -or ($_ -eq "M") } {
         $gender = "M"
     }
-    { ($_ -eq "vrouw") -or ($_ -eq "female") } {
+    { ($_ -eq "vrouw") -or ($_ -eq "female") -or ($_ -eq "V") } {
         $gender = "V"
     }
     Default {
@@ -24,18 +24,19 @@ switch ($p.Details.gender) {
 
 # Account mapping
 $account = [PSCustomObject]@{
-    p_medewerker           = $p.DisplayName
+    # p_medewerker must be "#ONVERANDERD#" this value cannot be changed and is added to the body when a update is required
+    p_medewerker           = "#ONVERANDERD#"
     p_achternaam           = $p.Name.FamilyName
     p_voorvoegsels         = $p.Name.FamilyNamePrefix
     p_voorletters          = $p.Name.Initials
-    p_roepnaam             = $p.Name.GivenName
+    p_roepnaam             = $p.Name.NickName
     p_geslacht             = $gender
     p_titel                = ""
     p_titel_achter         = ""
     p_indienst             = "" # P_indienst is determined automatically later in script
-    p_ldap_login           = $p.Name.FamilyName
+    p_ldap_login           = $p.Accounts.MicrosoftActiveDirectory.SamAccountName
     p_extern_onderhouden   = "J"
-    p_e_mail_adres         = $p.Contact.Business.Email
+    p_e_mail_adres         = $p.Accounts.MicrosoftActiveDirectory.mail
     p_faculteit            = "#ONVERANDERD#"
     p_organisatieonderdeel = "#ONVERANDERD#"
     p_profiel              = "#ONVERANDERD#"
@@ -136,7 +137,8 @@ try {
     if ($null -eq $currentAccount) {
         $action = 'NotFound'
         $dryRunMessage = "Osiris account for: [$($p.DisplayName)] not found. Possibly deleted"
-    } else {
+    }
+    else {
         # Gets value from employee account in target system
         $account.p_indienst = $currentAccount.indienst
 
@@ -145,7 +147,8 @@ try {
         
         #second account object for the compare function
         $targetAccount = [PSCustomObject]@{
-            p_medewerker           = $currentAccount.medewerker
+            # p_medewerker must be "#ONVERANDERD#" this value cannot be changed and is added to the body when a update is required
+            p_medewerker           = "#ONVERANDERD#"
             p_achternaam           = $currentAccount.achternaam
             p_voorvoegsels         = $currentAccount.voorvoegsels
             p_voorletters          = $currentAccount.voorletters
@@ -174,12 +177,6 @@ try {
             DifferenceObject = @($account.PSObject.Properties)
         }
         $propertiesChanged = (Compare-Object @splatCompareProperties -PassThru).Where({ $_.SideIndicator -eq '=>' })
-        
-        $ispMedewerkerChanged = $propertiesChanged | Where-Object { $_.Name -eq "p_medewerker" }
-
-        if ($ispMedewerkerChanged.count -gt 0) {
-            throw "Username has changed, the user can not be updated"
-        }
 
         if (($propertiesChanged.count -gt 0) -and ($null -ne $currentAccount)) {
             $action = 'Update'
@@ -209,8 +206,10 @@ try {
                         $body."$($prop.name)" = $prop.value                       
                     }
                 }
+                # Allways add p_medewerker to the body. This is required to update the medewerker instead of makeing a new one with the value $null
+                $body.p_medewerker = $currentAccount.medewerker
+                $body = ($body | ConvertTo-Json -Depth 10)     
 
-                $body = ($body | ConvertTo-Json -Depth 10)           
                 $splatAddUserParams = @{
                     Uri         = "$($config.BaseUrl)/basis/medewerker"
                     Method      = 'PUT'
@@ -218,12 +217,17 @@ try {
                     Headers     = $headers
                     ContentType = "application/json;charset=utf-8"
                 }
-                $null = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
+                $response = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
+
+                # if response has a error code throw
+                if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
+                    throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
+                }
 
                 $auditLogs.Add([PSCustomObject]@{
-                    Message = 'Update employee [medewerker] was successful'
-                    IsError = $false
-                })
+                        Message = 'Update employee [medewerker] was successful'
+                        IsError = $false
+                    })
 
                 if ($aRef.isPersIdUpdateRequred -eq $true) {
 
@@ -250,18 +254,23 @@ try {
                         }
                         $bodyOpenField = ($openField | ConvertTo-Json -Depth 10)
                         $splatAddOpenFieldParams = @{
-                            Uri     = "$($config.BaseUrl)/generiek/medewerker/vrij_veld/"
-                            Method  = 'POST'
-                            Body    = ([System.Text.Encoding]::UTF8.GetBytes($bodyOpenField))
-                            Headers = $headers
+                            Uri         = "$($config.BaseUrl)/generiek/medewerker/vrij_veld/"
+                            Method      = 'POST'
+                            Body        = ([System.Text.Encoding]::UTF8.GetBytes($bodyOpenField))
+                            Headers     = $headers
                             ContentType = "application/json;charset=utf-8"
                         }
-                        $null = Invoke-RestMethod @splatAddOpenFieldParams -Verbose:$false # Exception if not found
+                        $response = Invoke-RestMethod @splatAddOpenFieldParams -Verbose:$false # Exception if not found
+
+                        # if response has a error code throw
+                        if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
+                            throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
+                        }
 
                         $auditLogs.Add([PSCustomObject]@{
-                            Message = 'Update open field [vrij veld] was successful'
-                            IsError = $false
-                        })
+                                Message = 'Update open field [vrij veld] was successful'
+                                IsError = $false
+                            })
                     }
                 }
 

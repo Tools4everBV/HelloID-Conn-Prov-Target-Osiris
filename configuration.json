@@ -1,5 +1,15 @@
 [
     {
+        "key": "BaseUrl",
+        "type": "input",
+        "defaultValue": "",
+        "templateOptions": {
+            "label": "BaseUrl",
+            "description": "The URL to the API.",
+            "required": true
+        }
+    },
+    {
         "key": "ApiKey",
         "type": "input",
         "defaultValue": "",
@@ -11,23 +21,13 @@
         }
     },
     {
-        "key": "BaseUrl",
-        "type": "input",
-        "defaultValue": "",
-        "templateOptions": {
-            "label": "BaseUrl",
-            "description": "The URL to the API.",
-            "required": true
-        }
-    },
-    {
         "key": "UpdatePersonOnCorrelate",
         "type": "checkbox",
         "defaultValue": false,
         "templateOptions": {
-          "label": "Update account during correlating",
-          "required": false,
-          "description": "This will update the account in the target application during correlation"
+            "label": "Update account during correlating",
+            "required": false,
+            "description": "This will update the account in the target application during correlation"
         }
     },
     {
