@@ -1,23 +1,10 @@
-########################################
+#################################################
 # HelloID-Conn-Prov-Target-Osiris-Enable
-#
-# Version: 1.0.1
-########################################
-# Initialize default values
-$config = $configuration | ConvertFrom-Json
-$p = $person | ConvertFrom-Json
-$aRef = $AccountReference | ConvertFrom-Json
-$success = $false
-$auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
+# PowerShell V2
+#################################################
 
 # Enable TLS1.2
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
-
-# Set debug logging
-switch ($($config.IsDebug)) {
-    $true { $VerbosePreference = 'Continue' }
-    $false { $VerbosePreference = 'SilentlyContinue' }
-}
 
 #region functions
 function Resolve-OsirisError {
@@ -33,12 +20,12 @@ function Resolve-OsirisError {
             Line             = $ErrorObject.InvocationInfo.Line
             ErrorDetails     = $ErrorObject.Exception.Message
             FriendlyMessage  = $ErrorObject.Exception.Message
-        }       
+        }
         if ($ErrorObject.ErrorDetails) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails
             $httpErrorObj.FriendlyMessage = $ErrorObject.ErrorDetails
         }
-        elseif ((-not($null -eq $ErrorObject.Exception.Response) -and $ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException')) {         
+        elseif ((-not($null -eq $ErrorObject.Exception.Response) -and $ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException')) {
             $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
             if (-not([string]::IsNullOrWhiteSpace($streamReaderResponse))) {
                 $httpErrorObj.ErrorDetails = $streamReaderResponse
@@ -75,110 +62,112 @@ function Resolve-UrlEncoding {
 }
 #endregion
 
-# Begin
 try {
-    Write-Verbose "Verifying if a Osiris account for [$($p.DisplayName)] exists"
-    # Make sure to fail the action if the account does not exist in the target system!
+    # Verify if [aRef] has a value
+    if ([string]::IsNullOrEmpty($($actionContext.References.Account))) {
+        throw 'The account reference could not be found'
+    }
 
     $headers = @{
-        'Api-Key'      = $config.ApiKey
+        'Api-Key'      = $actionContext.Configuration.ApiKey
         'Content-Type' = 'application/json'
         Accept         = 'application/json'
     }
 
-    if ($null -eq $aRef.internalId) {
-        throw "Account reference is empty, cannot enable Osiris account"
-    }
-
-    # Get employee
-    $encodedGeneriekUserQuery = Resolve-UrlEncoding -InputString "{`"mede_id`":`"$($aRef.internalId)`"}"
+    Write-Information 'Verifying if a Osiris account exists'
+    $encodedGeneriekUserQuery = Resolve-UrlEncoding -InputString "{`"mede_id`":`"$($actionContext.References.Account)`"}"
     $splatGetUserGeneriekParams = @{
-        Uri     = "$($config.BaseUrl)/generiek/medewerker/?q=$($encodedGeneriekUserQuery)"
+        Uri     = "$($actionContext.Configuration.BaseUrl)/generiek/medewerker/?q=$($encodedGeneriekUserQuery)"
         Method  = 'GET'
         Headers = $headers
     }
-    $currentAccount = (Invoke-RestMethod @splatGetUserGeneriekParams -Verbose:$false).items
+    $correlatedAccount = (Invoke-RestMethod @splatGetUserGeneriekParams).Items
 
-    if ($null -eq $currentAccount) {
-        throw "Can't enable account for employee [$($aRef.internalId)], possibly deleted"
+    if ($null -ne $correlatedAccount) {
+        $action = 'EnableAccount'
+        if ($correlatedAccount.Count -gt 1) {
+            throw "Multiple accounts found for person where mede_id is: [$($actionContext.References.Account)]"
+        }
+        $correlatedAccount = ($correlatedAccount | Select-Object -First 1)
+    } else {
+        $action = 'NotFound'
     }
-
-    # Add an auditMessage showing what will happen during enforcement
-    if ($dryRun -eq $true) {
-        Write-Warning "[DryRun] Enable Osiris account for: [$($p.DisplayName)] will be executed during enforcement"
-    }
-
     # Process
-    if (-not($dryRun -eq $true)) {
-        Write-Verbose "Enabling Osiris account with accountReference: [$($aRef.internalId)]"
+    switch ($action) {
+        'EnableAccount' {
 
-        # Account object, object in $currentAccount is different compared to the body of the put
-        $targetAccount = [PSCustomObject]@{
-            p_medewerker           = $currentAccount.medewerker
-            p_achternaam           = $currentAccount.achternaam
-            p_voorvoegsels         = $currentAccount.voorvoegsels
-            p_voorletters          = $currentAccount.voorletters
-            p_roepnaam             = $currentAccount.roepnaam
-            p_geslacht             = $currentAccount.geslacht
-            p_titel                = $currentAccount.titel
-            p_titel_achter         = $currentAccount.titel_achter
-            p_indienst             = "J"
-            p_ldap_login           = $currentAccount.ldap_login
-            p_extern_onderhouden   = $currentAccount.extern_onderhouden
-            p_e_mail_adres         = $currentAccount.e_mail_adres
-            p_faculteit            = "#ONVERANDERD#"
-            p_organisatieonderdeel = "#ONVERANDERD#"
-            p_profiel              = "#ONVERANDERD#"
-            p_opleiding            = "#ONVERANDERD#"
-            p_onderdeel_toegang    = "#ONVERANDERD#"
-            p_opleiding_werkzaam   = "#ONVERANDERD#"
+             $targetAccount = [PSCustomObject]@{
+                p_medewerker           = $correlatedAccount.medewerker
+                p_achternaam           = $correlatedAccount.achternaam
+                p_voorvoegsels         = $correlatedAccount.voorvoegsels
+                p_voorletters          = $correlatedAccount.voorletters
+                p_roepnaam             = $correlatedAccount.roepnaam
+                p_geslacht             = $correlatedAccount.geslacht
+                p_titel                = $correlatedAccount.titel
+                p_titel_achter         = $correlatedAccount.titel_achter
+                p_indienst             = "J"
+                p_ldap_login           = $correlatedAccount.ldap_login
+                p_extern_onderhouden   = $correlatedAccount.extern_onderhouden
+                p_e_mail_adres         = $correlatedAccount.e_mail_adres
+                p_faculteit            = "#ONVERANDERD#"
+                p_organisatieonderdeel = "#ONVERANDERD#"
+                p_profiel              = "#ONVERANDERD#"
+                p_opleiding            = "#ONVERANDERD#"
+                p_onderdeel_toegang    = "#ONVERANDERD#"
+                p_opleiding_werkzaam   = "#ONVERANDERD#"
+            }        
+
+            $body = ($targetAccount | ConvertTo-Json -Depth 10)
+            $splatAddUserParams = @{
+                Uri         = "$($actionContext.Configuration.BaseUrl)/basis/medewerker"
+                Method      = 'PUT'
+                Body        = ([System.Text.Encoding]::UTF8.GetBytes($body))
+                Headers     = $headers
+                ContentType = "application/json;charset=utf-8"
+            }
+            if (-not($actionContext.DryRun -eq $true)) {
+                Write-Information "Enabling Osiris account with accountReference: [$($actionContext.References.Account)]"
+                $response = Invoke-RestMethod @splatAddUserParams -Verbose:$false
+                if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
+                    throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
+                }
+            } else {
+                Write-Information "[DryRun] Enable Osiris account with accountReference: [$($actionContext.References.Account)], will be executed during enforcement"
+            }
+
+            $outputContext.Success = $true
+            $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Message = 'Enable account [$($actionContext.References.Account)] was successful'
+                    IsError = $false
+                })
+            break
         }
 
-        $body = ($targetAccount | ConvertTo-Json -Depth 10)           
-        $splatAddUserParams = @{
-            Uri         = "$($config.BaseUrl)/basis/medewerker"
-            Method      = 'PUT'
-            Body        = ([System.Text.Encoding]::UTF8.GetBytes($body))
-            Headers     = $headers
-            ContentType = "application/json;charset=utf-8"
+        'NotFound' {
+            Write-Information "Osiris account: [$($actionContext.References.Account)] could not be found, indicating that it may have been deleted"
+            $outputContext.Success = $false
+            $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Message = "Osiris account: [$($actionContext.References.Account)] could not be found, indicating that it may have been deleted"
+                    IsError = $true
+                })
+            break
         }
-        $response = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
-
-        # if response has a error code throw
-        if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
-            throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
-        }
-
-        $success = $true
-        $auditLogs.Add([PSCustomObject]@{
-                Message = 'Enable account was successful'
-                IsError = $false
-            })
     }
-}
-catch {
-    $success = $false
+
+} catch {
+    $outputContext.success = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-OsirisError -ErrorObject $ex
         $auditMessage = "Could not enable Osiris account. Error: $($errorObj.FriendlyMessage)"
-        Write-Verbose "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
+        Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
+    } else {
+        $auditMessage = "Could not enable Osiris account. Error: $($_.Exception.Message)"
+        Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }
-    else {
-        $auditMessage = "Could not enable Osiris account. Error: $($ex.Exception.Message)"
-        Write-Verbose "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
-    }
-    $auditLogs.Add([PSCustomObject]@{
-            Message = $auditMessage
-            IsError = $true
-        })
-    # End
-}
-finally {
-    $result = [PSCustomObject]@{
-        Success   = $success
-        Auditlogs = $auditLogs
-    }
-    Write-Output $result | ConvertTo-Json -Depth 10
+    $outputContext.AuditLogs.Add([PSCustomObject]@{
+        Message = $auditMessage
+        IsError = $true
+    })
 }

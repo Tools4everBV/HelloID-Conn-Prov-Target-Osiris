@@ -1,58 +1,10 @@
-########################################
+#################################################
 # HelloID-Conn-Prov-Target-Osiris-Update
-#
-# Version: 1.0.1
-########################################
-# Initialize default values
-$config = $configuration | ConvertFrom-Json
-$p = $person | ConvertFrom-Json
-$aRef = $AccountReference | ConvertFrom-Json
-$success = $false
-$auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-switch ($p.Details.gender) {
-    { ($_ -eq "man") -or ($_ -eq "male") -or ($_ -eq "M") } {
-        $gender = "M"
-    }
-    { ($_ -eq "vrouw") -or ($_ -eq "female") -or ($_ -eq "V") } {
-        $gender = "V"
-    }
-    Default {
-        $gender = "O"
-    }
-}
-
-# Account mapping
-$account = [PSCustomObject]@{
-    # p_medewerker must be "#ONVERANDERD#" this value cannot be changed and is added to the body when a update is required
-    p_medewerker           = "#ONVERANDERD#"
-    p_achternaam           = $p.Name.FamilyName
-    p_voorvoegsels         = $p.Name.FamilyNamePrefix
-    p_voorletters          = $p.Name.Initials
-    p_roepnaam             = $p.Name.NickName
-    p_geslacht             = $gender
-    p_titel                = ""
-    p_titel_achter         = ""
-    p_indienst             = "" # P_indienst is determined automatically later in script
-    p_ldap_login           = $p.Accounts.MicrosoftActiveDirectory.SamAccountName
-    p_extern_onderhouden   = "J"
-    p_e_mail_adres         = $p.Accounts.MicrosoftActiveDirectory.mail
-    p_faculteit            = "#ONVERANDERD#"
-    p_organisatieonderdeel = "#ONVERANDERD#"
-    p_profiel              = "#ONVERANDERD#"
-    p_opleiding            = "#ONVERANDERD#"
-    p_onderdeel_toegang    = "#ONVERANDERD#"
-    p_opleiding_werkzaam   = "#ONVERANDERD#"
-}
+# PowerShell V2
+#################################################
 
 # Enable TLS1.2
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
-
-# Set debug logging
-switch ($($config.IsDebug)) {
-    $true { $VerbosePreference = 'Continue' }
-    $false { $VerbosePreference = 'SilentlyContinue' }
-}
 
 #region functions
 function Resolve-OsirisError {
@@ -68,12 +20,12 @@ function Resolve-OsirisError {
             Line             = $ErrorObject.InvocationInfo.Line
             ErrorDetails     = $ErrorObject.Exception.Message
             FriendlyMessage  = $ErrorObject.Exception.Message
-        }       
+        }
         if ($ErrorObject.ErrorDetails) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails
             $httpErrorObj.FriendlyMessage = $ErrorObject.ErrorDetails
         }
-        elseif ((-not($null -eq $ErrorObject.Exception.Response) -and $ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException')) {         
+        elseif ((-not($null -eq $ErrorObject.Exception.Response) -and $ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException')) {
             $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
             if (-not([string]::IsNullOrWhiteSpace($streamReaderResponse))) {
                 $httpErrorObj.ErrorDetails = $streamReaderResponse
@@ -84,7 +36,7 @@ function Resolve-OsirisError {
             $httpErrorObj.FriendlyMessage = ($httpErrorObj.FriendlyMessage | ConvertFrom-Json).error_description
         }
         catch {
-            #displaying the old message if an error occurs during an API call, as the error is related to the API call and not the conversion process to JSON.
+            # Displaying the old message if an error occurs during an API call, as the error is related to the API call and not the conversion process to JSON.
             Write-Warning "Unexpected web-service response, Error during Json conversion: $($_.Exception.Message)"
         }
         Write-Output $httpErrorObj
@@ -101,233 +53,197 @@ function Resolve-UrlEncoding {
     process {
         try {
             $UrlEncodedString = ([URI]::EscapeUriString($InputString))
+            Write-Output $UrlEncodedString
         }
         catch {
             throw "Could not encode query, error: $($_.Exception.Message)"
         }
-        Write-Output $UrlEncodedString
+    }
+}
+
+function ConvertTo-AccountObject {
+    param(
+        [parameter(Mandatory)]
+        [PSCustomObject]
+        $AccountModel,
+
+        [parameter( Mandatory,
+            ValueFromPipeline = $True)]
+        [PSCustomObject]
+        $SourceObject
+    )
+    try {
+            $modifiedObject = [PSCustomObject]@{}
+            foreach ($property in $AccountModel.PSObject.Properties) {
+                $LookupName = ($property.Name).SubString(2,$property.Name.length - 2)
+                $modifiedObject | Add-Member @{ $($property.Name) = $SourceObject.$LookupName}
+            }
+            Write-Output $modifiedObject
+    } catch {
+         $PSCmdlet.ThrowTerminatingError($_)
     }
 }
 #endregion
 
-# Begin
 try {
-    Write-Verbose "Verifying if a Osiris account for [$($p.DisplayName)] exists"
-    $account.p_medewerker = $account.p_medewerker.ToUpper()
+    # Verify if [aRef] has a value
+    if ([string]::IsNullOrEmpty($($actionContext.References.Account))) {
+        throw 'The account reference could not be found'
+    }
 
     $headers = @{
-        'Api-Key'      = $config.ApiKey
+        'Api-Key'      = "$($actionContext.configuration.ApiKey)"
         'Content-Type' = 'application/json'
         Accept         = 'application/json'
     }
 
-    if ($null -eq $aRef.internalId) {
-        throw "Account reference is empty, cannot update Osiris account"
-    }
-
-    # Get employee
-    $encodedGeneriekUserQuery = Resolve-UrlEncoding -InputString "{`"mede_id`":`"$($aRef.internalId)`"}"
+    Write-Information 'Verifying if a Osiris account exists'
+    $encodedGeneriekUserQuery = Resolve-UrlEncoding -InputString "{`"mede_id`":`"$($actionContext.References.Account)`"}"
     $splatGetUserGeneriekParams = @{
-        Uri     = "$($config.BaseUrl)/generiek/medewerker/?q=$($encodedGeneriekUserQuery)"
+        Uri     = "$($actionContext.Configuration.BaseUrl)/generiek/medewerker/?q=$($encodedGeneriekUserQuery)"
         Method  = 'GET'
         Headers = $headers
     }
-    $currentAccount = (Invoke-RestMethod @splatGetUserGeneriekParams -Verbose:$false).items
+    $correlatedAccount = (Invoke-RestMethod @splatGetUserGeneriekParams -Verbose:$false).items  
 
-    if ($null -eq $currentAccount) {
-        $action = 'NotFound'
-        $dryRunMessage = "Osiris account for: [$($p.DisplayName)] not found. Possibly deleted"
-    }
-    else {
-        # Gets value from employee account in target system
-        $account.p_indienst = $currentAccount.indienst
+    if ($null -ne $correlatedAccount) {
+        if ($correlatedAccount.Count -gt 1) {
+            throw "Multiple accounts found for person where mede_id is: [$($actionContext.References.Account)]"
+        }
 
-        # Verify if the account must be updated
+        $correlatedAccount = ($correlatedAccount | Select-Object -First 1)
+        $outputContext.PreviousData = $correlatedAccount | ConvertTo-AccountObject -AccountModel $outputContext.Data
         # Always compare the account against the current account in target system
-        
-        #second account object for the compare function
-        $targetAccount = [PSCustomObject]@{
-            # p_medewerker must be "#ONVERANDERD#" this value cannot be changed and is added to the body when a update is required
-            p_medewerker           = "#ONVERANDERD#"
-            p_achternaam           = $currentAccount.achternaam
-            p_voorvoegsels         = $currentAccount.voorvoegsels
-            p_voorletters          = $currentAccount.voorletters
-            p_roepnaam             = $currentAccount.roepnaam
-            p_geslacht             = $currentAccount.geslacht
-            p_titel                = $currentAccount.titel
-            p_titel_achter         = $currentAccount.titel_achter
-            p_indienst             = $currentAccount.indienst
-            p_ldap_login           = $currentAccount.ldap_login
-            p_extern_onderhouden   = $currentAccount.extern_onderhouden
-            p_e_mail_adres         = $currentAccount.e_mail_adres
-            p_faculteit            = "#ONVERANDERD#"
-            p_organisatieonderdeel = "#ONVERANDERD#"
-            p_profiel              = "#ONVERANDERD#"
-            p_opleiding            = "#ONVERANDERD#"
-            p_onderdeel_toegang    = "#ONVERANDERD#"
-            p_opleiding_werkzaam   = "#ONVERANDERD#"
-        }
-
-        #set all null value's to empty string for both objects
-        $account.psobject.Properties | ForEach-Object { if ($null -eq $_.value) { $_.value = '' } }
-        $targetAccount.psobject.Properties | ForEach-Object { if ($null -eq $_.value) { $_.value = '' } }
-        
         $splatCompareProperties = @{
-            ReferenceObject  = @($targetAccount.PSObject.Properties)
-            DifferenceObject = @($account.PSObject.Properties)
+            ReferenceObject  = @($outputContext.PreviousData.PSObject.Properties)
+            DifferenceObject = @($actionContext.Data.PSObject.Properties)
         }
-        $propertiesChanged = (Compare-Object @splatCompareProperties -PassThru).Where({ $_.SideIndicator -eq '=>' })
-
-        if (($propertiesChanged.count -gt 0) -and ($null -ne $currentAccount)) {
-            $action = 'Update'
-            $dryRunMessage = "Account property(s) required to update: [$($propertiesChanged.name -join ",")]"
-        }
-        elseif (-not($propertiesChanged)) {
+        $propertiesChanged = Compare-Object @splatCompareProperties -PassThru | Where-Object { ($_.SideIndicator -eq '=>') -and ($_.Value -ne '#ONVERANDERD#') }
+        if ($propertiesChanged) {
+            $action = 'UpdateAccount'
+        } else {
             $action = 'NoChanges'
-            $dryRunMessage = 'No changes will be made to the account during enforcement'
         }
-    }
-
-    # Add an auditMessage showing what will happen during enforcement
-    if ($dryRun -eq $true) {
-        Write-Warning "[DryRun] $dryRunMessage"
+    } else {
+        $action = 'NotFound'
     }
 
     # Process
-    if (-not($dryRun -eq $true)) {
-        switch ($action) {
-            'Update' {
-                Write-Verbose "Updating Osiris account with accountReference: [$($aRef.internalId)]"
-                # Update employee
-
-                $body = $targetAccount
-                if ($propertiesChanged) {
-                    foreach ($prop in $propertiesChanged) {
-                        $body."$($prop.name)" = $prop.value                       
-                    }
-                }
-                # Allways add p_medewerker to the body. This is required to update the medewerker instead of makeing a new one with the value $null
-                $body.p_medewerker = $currentAccount.medewerker
-                $body = ($body | ConvertTo-Json -Depth 10)     
-
+    switch ($action) {
+        'UpdateAccount' {
+            Write-Information "Account property(s) required to update: $($propertiesChanged.Name -join ', ')"
+            if (-not($actionContext.DryRun -eq $true)) {
+                Write-Information "Updating Osiris account with accountReference: [$($actionContext.References.Account)]"
+                $body = $actionContext.Data
+                $body | Add-Member -MemberType 'NotePropery' -Name "p_medewerker" -value $correlatedAccount.medewerker
+                $body = ($body | ConvertTo-Json -Depth 10)
                 $splatAddUserParams = @{
-                    Uri         = "$($config.BaseUrl)/basis/medewerker"
+                    Uri         = "$($actionContext.Configuration.BaseUrl)/basis/medewerker"
                     Method      = 'PUT'
                     Body        = ([System.Text.Encoding]::UTF8.GetBytes($body))
                     Headers     = $headers
                     ContentType = "application/json;charset=utf-8"
                 }
-                $response = Invoke-RestMethod @splatAddUserParams -Verbose:$false # Exception if not found
-
-                # if response has a error code throw
+                $response = Invoke-RestMethod @splatAddUserParams -Verbose:$false
                 if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
                     throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
                 }
 
-                $auditLogs.Add([PSCustomObject]@{
-                        Message = 'Update employee [medewerker] was successful'
-                        IsError = $false
-                    })
+                $outputContext.Success = $true
+                $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Message = "Update account was successful, Account property(s) updated: [$($propertiesChanged.name -join ',')]"
+                    IsError = $false
+                })
 
-                if ($aRef.isPersIdUpdateRequred -eq $true) {
+                # check if updaten of free field is required
+                if ($actionContext.CorrelationConfiguration.Enabled) {
+                    $correlationField = $actionContext.CorrelationConfiguration.AccountField
+                    $correlationValue = $actionContext.CorrelationConfiguration.PersonFieldValue
 
-                    # Update open field [vrij veld]
-                    $encodedOpenFieldQuery = Resolve-UrlEncoding -InputString "{`"vrij_veld`":`"PersID`",`"rubriek`":`"HRM`",`"referentie_id`":`"$($aRef.internalId)`"}"
+                    if ([string]::IsNullOrEmpty($($correlationField))) {
+                        throw 'Correlation is enabled but not configured correctly'
+                    }
+                    if ([string]::IsNullOrEmpty($($correlationValue))) {
+                        throw 'Correlation is enabled but [accountFieldValue] is empty. Please make sure it is correctly mapped'
+                    }
+
+                    $encodedOpenFieldQuery = Resolve-UrlEncoding -InputString "{`"vrij_veld`":`"$correlationField`",`"rubriek`":`"HRM`",`"medewerker`":`"$($correlatedAccount.medewerker)`"}"
                     $splatOpenFieldParams = @{
-                        Uri     = "$($config.BaseUrl)/generiek/medewerker/vrij_veld/?q=$($encodedOpenFieldQuery)"
+                        Uri     = "$($actionContext.Configuration.BaseUrl)/generiek/medewerker/vrij_veld/?q=$($encodedOpenFieldQuery)"
                         Method  = 'GET'
                         Headers = $headers
                     }
-                    $splatOpenField = Invoke-RestMethod @splatOpenFieldParams -Verbose:$false # Exception if not found
+                    $targetOpenField = Invoke-RestMethod @splatOpenFieldParams -Verbose:$false
 
-                    if ([string]::IsNullOrEmpty($splatOpenField.items.inhoud)) {
+                    if ($targetOpenField.inhoud_verkort -ne $correlationValue) {
+                         # Create or update open field [vrij veld]
                         $openField = @{
-                            medewerker         = $splatOpenField.items.medewerker
+                            medewerker         = $correlatedAccount.medewerker
                             rubriek            = "HRM"
                             volgnummer_rubriek = 1
-                            vrij_veld          = "PersID"
-                            inhoud             = $p.ExternalId
-                            inhoud_verkort     = $p.ExternalId
+                            vrij_veld          = $correlationField
+                            inhoud             = $correlationValue
+                            inhoud_verkort     = $correlationValue
                             referentietabel    = "mede"
-                            referentie_id      = $splatOpenField.items.referentie_id
-                            mvrv_id            = $splatOpenField.items.mvrv_id
+                            referentie_id      = $correlatedAccount.mede_id
+                            mvrv_id            = $targetOpenFieldId
                         }
-                        $bodyOpenField = ($openField | ConvertTo-Json -Depth 10)
+
+                        $openFieldBody = ($openField | ConvertTo-Json -Depth 10)
                         $splatAddOpenFieldParams = @{
-                            Uri         = "$($config.BaseUrl)/generiek/medewerker/vrij_veld/"
-                            Method      = 'POST'
-                            Body        = ([System.Text.Encoding]::UTF8.GetBytes($bodyOpenField))
-                            Headers     = $headers
-                            ContentType = "application/json;charset=utf-8"
+                            Uri     = "$($actionContext.Configuration.BaseUrl)/generiek/medewerker/vrij_veld/"
+                            Method  = 'POST'
+                            Body    = ([System.Text.Encoding]::UTF8.GetBytes($openFieldBody))
+                            Headers = $headers
                         }
                         $response = Invoke-RestMethod @splatAddOpenFieldParams -Verbose:$false # Exception if not found
-
                         # if response has a error code throw
                         if (-Not([string]::IsNullOrEmpty($response.statusmeldingen.code))) {
-                            throw "Osiris returned a error [$($response.statusmeldingen | convertto-json)]"
+                            throw "Updating vrij_veld failed with message [$($response.statusmeldingen | convertto-json)]"
                         }
-
-                        $auditLogs.Add([PSCustomObject]@{
-                                Message = 'Update open field [vrij veld] was successful'
-                                IsError = $false
-                            })
                     }
                 }
-
-                $success = $true
-                $auditLogs.Add([PSCustomObject]@{
-                        Message = 'Update account was successful'
-                        IsError = $false
-                    })
-                break
+            } else {
+                Write-Information "[DryRun] Update Osiris account with accountReference: [$($actionContext.References.Account)], will be executed during enforcement"
             }
+            break
+        }
 
-            'NoChanges' {
-                Write-Verbose "No changes to Osiris account with accountReference: [$($aRef.internalId)]"
+        'NoChanges' {
+            Write-Information "No changes to Osiris account with accountReference: [$($actionContext.References.Account)]"
 
-                $success = $true
-                $auditLogs.Add([PSCustomObject]@{
-                        Message = 'No changes will be made to the account during enforcement'
-                        IsError = $false
-                    })
-                break
-            }
+            $outputContext.Success = $true
+            $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Message = 'No changes will be made to the account during enforcement'
+                    IsError = $false
+                })
+            break
+        }
 
-            'NotFound' {
-                $success = $false
-                $auditLogs.Add([PSCustomObject]@{
-                        Message = "Osiris account for: [$($p.DisplayName)] not found. Possibly deleted"
-                        IsError = $true
-                    })
-                break
-            }
+        'NotFound' {
+            Write-Information "Osiris account: [$($actionContext.References.Account)] could not be found, indicating that it may have been deleted"
+            $outputContext.Success = $false
+            $outputContext.AuditLogs.Add([PSCustomObject]@{
+                    Message = "Osiris account: [$($actionContext.References.Account)] could not be found, indicating that it may have been deleted"
+                    IsError = $true
+                })
+            break
         }
     }
-}
-catch {
-    $success = $false
+} catch {
+    $outputContext.Success  = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-OsirisError -ErrorObject $ex
         $auditMessage = "Could not update Osiris account. Error: $($errorObj.FriendlyMessage)"
-        Write-Verbose "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
-    }
-    else {
+        Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
+    } else {
         $auditMessage = "Could not update Osiris account. Error: $($ex.Exception.Message)"
-        Write-Verbose "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
+        Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }
-    $auditLogs.Add([PSCustomObject]@{
+    $outputContext.AuditLogs.Add([PSCustomObject]@{
             Message = $auditMessage
             IsError = $true
         })
-    # End
-}
-finally {
-    $result = [PSCustomObject]@{
-        Success   = $success
-        Account   = $account
-        Auditlogs = $auditLogs
-    }
-    Write-Output $result | ConvertTo-Json -Depth 10
 }
