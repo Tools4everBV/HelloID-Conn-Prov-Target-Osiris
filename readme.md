@@ -2,6 +2,9 @@
 
 > [!IMPORTANT]
 > This repository contains the connector and configuration code only. The implementer is responsible to acquire the connection details such as username, password, certificate, etc. You might even need to sign a contract or agreement with the supplier before implementing this connector. Please contact the client's application manager to coordinate the connector requirements.
+>
+> [!IMPORTANT]
+> This connector is updated from a v1 to a powershell v2 connector without access to a test environment, therefore the code is not tested and should be treated as such.
 
 <p align="center">
   <img src="assets/logo.png">
