@@ -174,6 +174,7 @@ try {
                         Headers = $headers
                     }
                     $targetOpenField = Invoke-RestMethod @splatOpenFieldParams -Verbose:$false
+                    $targetOpenFieldId = $targetOpenField.items.mvrv_id
 
                     if ($targetOpenField.inhoud_verkort -ne $correlationValue) {
                          # Create or update open field [vrij veld]
