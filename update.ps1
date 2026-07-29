@@ -135,7 +135,7 @@ try {
             if (-not($actionContext.DryRun -eq $true)) {
                 Write-Information "Updating Osiris account with accountReference: [$($actionContext.References.Account)]"
                 $body = $actionContext.Data
-                $body | Add-Member -MemberType 'NotePropery' -Name "p_medewerker" -value $correlatedAccount.medewerker
+                $body | Add-Member -MemberType 'NoteProperty' -Name "p_medewerker" -value $correlatedAccount.medewerker
                 $body = ($body | ConvertTo-Json -Depth 10)
                 $splatAddUserParams = @{
                     Uri         = "$($actionContext.Configuration.BaseUrl)/basis/medewerker"
