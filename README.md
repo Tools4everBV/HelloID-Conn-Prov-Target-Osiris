@@ -8,7 +8,7 @@
 > This connector is updated from a v1 to a powershell v2 connector without access to a test environment, therefore the code is not tested and should be treated as such.
 
 <p align="center">
-  <img src="assets/logo.png">
+  <img src="https://github.com/Tools4everBV/HelloID-Conn-Prov-Target-Osiris/blob/main/Logo.png?raw=true">
 </p>
 
 ## Table of contents
