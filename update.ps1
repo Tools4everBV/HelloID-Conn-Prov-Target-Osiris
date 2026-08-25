@@ -135,7 +135,7 @@ try {
             if (-not($actionContext.DryRun -eq $true)) {
                 Write-Information "Updating Osiris account with accountReference: [$($actionContext.References.Account)]"
                 $body = $actionContext.Data
-                $body | Add-Member -MemberType 'NotePropery' -Name "p_medewerker" -value $correlatedAccount.medewerker
+                $body | Add-Member -MemberType 'NoteProperty' -Name "p_medewerker" -value $correlatedAccount.medewerker
                 $body = ($body | ConvertTo-Json -Depth 10)
                 $splatAddUserParams = @{
                     Uri         = "$($actionContext.Configuration.BaseUrl)/basis/medewerker"
@@ -174,6 +174,7 @@ try {
                         Headers = $headers
                     }
                     $targetOpenField = Invoke-RestMethod @splatOpenFieldParams -Verbose:$false
+                    $targetOpenFieldId = $targetOpenField.items.mvrv_id
 
                     if ($targetOpenField.inhoud_verkort -ne $correlationValue) {
                          # Create or update open field [vrij veld]

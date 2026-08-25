@@ -8,7 +8,7 @@
 > This connector is updated from a v1 to a powershell v2 connector without access to a test environment, therefore the code is not tested and should be treated as such.
 
 <p align="center">
-  <img src="assets/logo.png">
+  <img src="https://github.com/Tools4everBV/HelloID-Conn-Prov-Target-Osiris/blob/main/Logo.png?raw=true">
 </p>
 
 ## Table of contents
@@ -87,7 +87,27 @@ Currently the connector only supports  correlation on open fields, not on basic 
 ### Field mapping
 
 The field mapping can be imported by using the _fieldMapping.json_ file.
-Note that the field p_medewerker is only used by the create, as it cannot be updated because it is used as an identifier by the update call of Osirus. Therefore it is by default mapped as "none" If added in for the update action, It will be ignored in the update call even if you specify a value in the mapping.
+Note that the field p_medewerker is only used by the create, as it cannot be updated because it is used as an identifier by the update call of Osirus. Therefore it is by default mapped as "none" If added in for the 
+update action, It will be ignored in the update call even if you specify a value in the mapping.
+
+> [!TIP]
+> The following fields are also available in the Osiris API but are not included in the default field mapping and can be added manually if required:
+> - p_telefoonnummer
+> - p_bereikbaarheid
+> - p_bereikbaarheid_en
+> - p_type_notitie
+> - p_vacature
+> - p_beperk_lijst_fac
+> - p_selecteer_student
+> - p_voertaal
+> - p_toegang_osiris
+> - p_toegang_docent_begeleider
+> - p_functie
+> - p_gebruikerstype
+> - p_toegang_analytics
+> - p_toegang_query
+> - p_toegang_planapp
+> - p_toegang_catalogus
 
 ### Account Reference
 
@@ -130,10 +150,7 @@ Not available publicly.
 
 > [!TIP]
 > _For more information on how to configure a HelloID PowerShell connector, please refer to our [documentation](https://docs.helloid.com/en/provisioning/target-systems/powershell-v2-target-systems.html) pages_.
-
-> [!TIP]
->  _If you need help, feel free to ask questions on our [forum] https://forum.helloid.com/forum/helloid-connectors/provisioning/4943-helloid-conn-prov-target-osiris_.
-
+> 
 ## HelloID docs
 
 The official HelloID documentation can be found at: https://docs.helloid.com/
